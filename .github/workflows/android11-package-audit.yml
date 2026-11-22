@@ -1,0 +1,80 @@
+name: Android 11 package installation audit
+on:
+  workflow_dispatch:
+    inputs:
+      apk_url:
+        description: Public HTTPS APK URL
+        required: true
+        default: https://github.com/SURIDAGEST/coupe-connect-updates/releases/download/v2026.11.22-car17-phone18-aa9-updates-preview/car-17-7d265303f0a493a6edb1f4f557c2a5b39b53938cef1341dc721991260162268f.apk
+      apk_sha256:
+        description: Expected SHA-256
+        required: true
+        default: 7d265303f0a493a6edb1f4f557c2a5b39b53938cef1341dc721991260162268f
+permissions: {}
+jobs:
+  android11:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    env:
+      APK_URL: ${{ inputs.apk_url }}
+      APK_SHA256: ${{ inputs.apk_sha256 }}
+    steps:
+      - name: Download and verify the exact published APK
+        run: |
+          python3 - <<'PY'
+          import urllib.request,urllib.parse,hashlib,os,re,json,pathlib
+          url=os.environ['APK_URL'];expected=os.environ['APK_SHA256'].lower()
+          assert urllib.parse.urlsplit(url).scheme=='https' and re.fullmatch('[0-9a-f]{64}',expected)
+          data=urllib.request.urlopen(url,timeout=60).read(50*1024*1024+1)
+          assert 0<len(data)<=50*1024*1024 and hashlib.sha256(data).hexdigest()==expected
+          pathlib.Path('apk-under-test.apk').write_bytes(data)
+          pathlib.Path('audit').mkdir()
+          pathlib.Path('audit/download.json').write_text(json.dumps({'url':url,'sha256':expected,'bytes':len(data),'hashVerified':True},indent=2))
+          PY
+      - name: Enable hardware acceleration
+        run: |
+          sudo chmod 666 /dev/kvm
+      - name: Write the package-manager test
+        run: |
+          cat > run_install_audit.py <<'PY'
+          import subprocess,pathlib,json,time
+          out=pathlib.Path('audit')
+          def adb(*args):
+              result=subprocess.run(['adb',*args],capture_output=True,text=True,timeout=180)
+              return {'exitCode':result.returncode,'stdout':result.stdout,'stderr':result.stderr}
+          environment={key:adb('shell','getprop',key)['stdout'].strip() for key in ['ro.build.version.release','ro.build.version.sdk','ro.product.cpu.abilist','ro.build.fingerprint']}
+          (out/'environment.json').write_text(json.dumps(environment,indent=2))
+          assert environment['ro.build.version.sdk']=='30'
+          install=adb('install','--no-streaming','-r','apk-under-test.apk')
+          (out/'install.json').write_text(json.dumps(install,indent=2))
+          print(json.dumps(install))
+          (out/'package.txt').write_text(adb('shell','dumpsys','package','com.coupe.connect')['stdout'])
+          # Also exercise opening an APK from Downloads with the official system installer.
+          (out/'push.json').write_text(json.dumps(adb('push','apk-under-test.apk','/sdcard/Download/Coupe-Connect-Car.apk'),indent=2))
+          activity=adb('shell','am','start','-W','-a','android.intent.action.VIEW','-d','file:///sdcard/Download/Coupe-Connect-Car.apk','-t','application/vnd.android.package-archive','--grant-read-uri-permission')
+          (out/'installer-activity.json').write_text(json.dumps(activity,indent=2))
+          time.sleep(3)
+          adb('shell','uiautomator','dump','/sdcard/installer.xml')
+          adb('pull','/sdcard/installer.xml',str(out/'installer.xml'))
+          screenshot=subprocess.run(['adb','exec-out','screencap','-p'],capture_output=True,timeout=30)
+          if screenshot.returncode==0:(out/'installer.png').write_bytes(screenshot.stdout)
+          (out/'logcat.txt').write_text(adb('logcat','-d','-t','1200')['stdout'])
+          assert install['exitCode']==0 and 'Success' in install['stdout'], 'Android 11 installation failed; see exact Package Manager result'
+          PY
+      - name: Test on Android 11
+        uses: reactivecircus/android-emulator-runner@ed009f5318f15b1cf93a191b856c4f1748a2d4c1
+        with:
+          api-level: 30
+          target: google_apis
+          arch: x86_64
+          ram-size: 1536M
+          disk-size: 2048M
+          emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect -camera-back none
+          script: python3 run_install_audit.py
+      - name: Preserve audit evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: android11-package-audit-${{ github.run_id }}
+          path: audit/
+          retention-days: 14
