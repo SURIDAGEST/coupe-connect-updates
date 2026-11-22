@@ -79,7 +79,7 @@ jobs:
           MAP_PICKER_ID: ${{ inputs.map_picker_id }}
         with:
           api-level: 27
-          target: google_apis
+          target: default
           arch: x86_64
           ram-size: 1024M
           emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect -feature -Vulkan
