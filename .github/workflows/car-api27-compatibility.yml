@@ -15,13 +15,12 @@ on:
 permissions:
   contents: read
 jobs:
-  api27:
+  fetchCandidate:
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
+    timeout-minutes: 5
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
       - name: Download hash-bound candidate and regression baseline
         env:
           GH_TOKEN: ${{ github.token }}
@@ -50,6 +49,27 @@ jobs:
           assert hashlib.sha256(data).hexdigest()=='7d265303f0a493a6edb1f4f557c2a5b39b53938cef1341dc721991260162268f'
           pathlib.Path('baseline.apk').write_bytes(data)
           PY
+      - name: Pass only the two verified APKs to the unprivileged test job
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: api27-verified-inputs
+          path: |
+            candidate.apk
+            baseline.apk
+          retention-days: 1
+  api27:
+    needs: fetchCandidate
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: api27-verified-inputs
       - name: Enable hardware acceleration
         run: sudo chmod 666 /dev/kvm
       - name: Test installation, receiver, dashboard and native settings
