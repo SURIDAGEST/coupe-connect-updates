@@ -28,6 +28,10 @@ jobs:
           data=urllib.request.urlopen(url,timeout=60).read(50*1024*1024+1)
           assert 0<len(data)<=50*1024*1024 and hashlib.sha256(data).hexdigest()==expected
           pathlib.Path('apk-under-test.apk').write_bytes(data)
+          helper_url='https://github.com/SURIDAGEST/coupe-connect-updates/releases/download/v2026.11.22-car17-phone18-aa9-updates-preview/Comprobar-Coupe.apk'
+          helper=urllib.request.urlopen(helper_url,timeout=60).read(1024*1024)
+          assert hashlib.sha256(helper).hexdigest()=='37e7655fdf32cc995df2b7834e8438e9e7b551127ef6fae74e1970416fa83d1a'
+          pathlib.Path('diagnostic.apk').write_bytes(helper)
           pathlib.Path('audit').mkdir()
           pathlib.Path('audit/download.json').write_text(json.dumps({'url':url,'sha256':expected,'bytes':len(data),'hashVerified':True},indent=2))
           PY
@@ -59,6 +63,18 @@ jobs:
           screenshot=subprocess.run(['adb','exec-out','screencap','-p'],capture_output=True,timeout=30)
           if screenshot.returncode==0:(out/'installer.png').write_bytes(screenshot.stdout)
           (out/'logcat.txt').write_text(adb('logcat','-d','-t','1200')['stdout'])
+          diagnostic=adb('install','--no-streaming','-r','diagnostic.apk')
+          (out/'diagnostic-install.json').write_text(json.dumps(diagnostic,indent=2))
+          assert diagnostic['exitCode']==0 and 'Success' in diagnostic['stdout']
+          activity=adb('shell','am','start','-W','-n','com.coupe.installcheck/com.coupe.installcheck.MainActivity')
+          (out/'diagnostic-launch.json').write_text(json.dumps(activity,indent=2))
+          time.sleep(2)
+          adb('shell','uiautomator','dump','/sdcard/diagnostic.xml')
+          adb('pull','/sdcard/diagnostic.xml',str(out/'diagnostic.xml'))
+          assert 'SDK/API: 30' in (out/'diagnostic.xml').read_text(), 'Native diagnostic screen failed to show actual SDK'
+          screenshot=subprocess.run(['adb','exec-out','screencap','-p'],capture_output=True,timeout=30)
+          if screenshot.returncode==0:(out/'diagnostic.png').write_bytes(screenshot.stdout)
+          (out/'diagnostic-logcat.txt').write_text(adb('logcat','-d','-t','700')['stdout'])
           assert install['exitCode']==0 and 'Success' in install['stdout'], 'Android 11 installation failed; see exact Package Manager result'
           PY
       - name: Test on Android 11
