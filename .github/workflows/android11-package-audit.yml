@@ -62,7 +62,7 @@ jobs:
           assert install['exitCode']==0 and 'Success' in install['stdout'], 'Android 11 installation failed; see exact Package Manager result'
           PY
       - name: Test on Android 11
-        uses: reactivecircus/android-emulator-runner@ed009f5318f15b1cf93a191b856c4f1748a2d4c1
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         with:
           api-level: 30
           target: google_apis
