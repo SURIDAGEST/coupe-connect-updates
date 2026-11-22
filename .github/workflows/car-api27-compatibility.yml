@@ -82,7 +82,7 @@ jobs:
           target: default
           arch: x86_64
           ram-size: 1024M
-          emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect -feature -Vulkan
+          emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect -feature -Vulkan -skin 800x480
           script: python3 tests/car_api27_smoke.py
       - name: Preserve actual runtime evidence
         if: always()
