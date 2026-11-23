@@ -83,26 +83,35 @@ def main():
     adb('root');adb('wait-for-device');adb('shell','wm','size','800x480');adb('shell','wm','density','160');adb('logcat','-c')
     original_home=home();save('home-before.json',original_home)
     package=adb('shell','dumpsys','package',PKG)[1];uid=int(re.search(r'userId=(\d+)',package).group(1))
-    original_ce=original_de=None;original_location=adb('shell','settings','get','secure','location_mode')[1].strip()
+    original_ce=original_de=None;prefs_captured=False
+    original_location=adb('shell','settings','get','secure','location_mode')[1].strip()
+    original_providers=adb('shell','settings','get','secure','location_providers_allowed')[1].strip()
     try:
         start(WAIT)
         wait_text('00-setup-required',['Welcome to Open Headunit'])
         check('setupNotBypassedOnFreshInstall',True)
+        adb('shell','am','force-stop',PKG)
+        code,text,_=adb('shell','cat',CE);assert code==0;original_ce=text.encode('utf-8')
+        code,text,_=adb('shell','cat',DE);original_de=text.encode('utf-8') if code==0 else None
+        prefs_captured=True
         start(DIAG);wait_text('01-permission-missing',['ubicación: no','sin sesión confirmada'])
         check('missingLocationPermissionReported',True)
         for permission in ['android.permission.ACCESS_COARSE_LOCATION','android.permission.ACCESS_FINE_LOCATION']:
             assert adb('shell','pm','grant',PKG,permission)[0]==0
         wait_text('02-permission-granted',['ubicación: sí','sin sesión confirmada'])
         check('grantedLocationPermissionReported',True)
-        adb('shell','settings','put','secure','location_mode','0')
+        # Directly writing location_mode through adb does not toggle provider state on API27.
+        # Change the actual allowed providers, then verify the injected OS condition.
+        for provider in ['gps','network']:adb('shell','settings','put','secure','location_providers_allowed','-'+provider)
+        providers=adb('shell','settings','get','secure','location_providers_allowed')[1].strip()
+        save('disabled-location-providers.json',providers)
+        check('locationProvidersActuallyDisabled','gps' not in providers and 'network' not in providers)
         wait_text('03-location-off',['ubicación: sí','activada: no'])
         check('permissionAndProviderDistinguished',True)
-        adb('shell','settings','put','secure','location_mode','3')
+        for provider in ['gps','network']:adb('shell','settings','put','secure','location_providers_allowed','+'+provider)
         wait_text('04-location-on',['activada: sí','sin sesión confirmada'])
         check('providerRestoredWithoutFakeSession',True)
         adb('shell','am','force-stop',PKG)
-        code,text,_=adb('shell','cat',CE);assert code==0;original_ce=text.encode('utf-8')
-        code,text,_=adb('shell','cat',DE);original_de=text.encode('utf-8') if code==0 else None
         ready=fixture(original_ce,{'has-completed-setup-wizard':True,'has-accepted-disclaimer':True,'enable-car-launcher':True,'auto-start-on-boot':True,'auto-start-on-boot-in-background':True,'auto-start-on-screen-on':True})
         device=fixture(original_de,{'auto-start-on-boot':True,'auto-start-on-screen-on':True,'wireless-paused-by-boot-loop':False})
         write_pref(CE,ready,uid);write_pref(DE,device,uid)
@@ -137,9 +146,12 @@ def main():
         adb('shell','pm','disable',ALIAS)
         if original_ce is not None:write_pref(CE,original_ce,uid)
         if original_de is not None:write_pref(DE,original_de,uid)
+        elif prefs_captured:adb('shell','rm','-f',DE)
         adb('shell','svc','wifi','enable')
         if original_location.isdigit():adb('shell','settings','put','secure','location_mode',original_location)
-        save('restoration.json',{'homeRestored':home()==original_home,'originalCeBytesRestored':original_ce is not None and adb('shell','cat',CE)[1].encode('utf-8')==original_ce,'originalDeBytesRestored':original_de is not None and adb('shell','cat',DE)[1].encode('utf-8')==original_de})
+        if original_providers!='null':adb('shell','settings','put','secure','location_providers_allowed',original_providers)
+        de=adb('shell','cat',DE)
+        save('restoration.json',{'homeRestored':home()==original_home,'originalCeBytesRestored':original_ce is not None and adb('shell','cat',CE)[1].encode('utf-8')==original_ce,'originalDeBytesRestored':prefs_captured and ((original_de is None and de[0]!=0) or (original_de is not None and de[1].encode('utf-8')==original_de))})
         (OUT/'final-logcat.txt').write_text(adb('logcat','-d')[1],encoding='utf-8')
     log=(OUT/'final-logcat.txt').read_text(encoding='utf-8')
     fatal=bool(re.search(r'FATAL EXCEPTION[^\n]*\n(?:.*\n){0,5}.*Process: com\.coupe\.connect',log));anr='ANR in com.coupe.connect' in log
