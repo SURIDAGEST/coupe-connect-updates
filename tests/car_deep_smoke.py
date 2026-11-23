@@ -76,7 +76,7 @@ def main():
     v.check('actualRequestedApi',sdk==int(os.environ.get('EXPECTED_API','27')) and sdk in (27,35))
     expected=os.environ['CANDIDATE_SHA256']
     v.check('exactCandidate',hashlib.sha256(Path('candidate.apk').read_bytes()).hexdigest()==expected)
-    v.check('exactBaseline',hashlib.sha256(Path('baseline.apk').read_bytes()).hexdigest()=='ca99a8d191c4fdaf8b280b1a303251d1042dcbdf85fb06311c3cc5196624eee5')
+    v.check('exactBaseline',hashlib.sha256(Path('baseline.apk').read_bytes()).hexdigest()=='1f3edefbce434610977b86e47c64f20e2612403fc4a339d0b4e60c1bcb6ddd80')
     result=v.adb('install','--no-streaming','-r','baseline.apk',timeout=120);v.save('baseline-install.json',result)
     v.check('baselineInstalled',result[0]==0 and 'Success' in result[1])
     v.adb('root');v.adb('wait-for-device');v.adb('shell','wm','size','800x480');v.adb('shell','wm','density','160')
