@@ -133,11 +133,28 @@ def main():
         check('homeEntryAfterActualVirtualReboot',home()==ALIAS)
         services=adb('shell','dumpsys','activity','services',PKG)[1];(OUT/'services-after-reboot.txt').write_text(services,encoding='utf-8')
         check('receiverServicePresentAfterBoot','AapService' in services)
+        # HOME respawns a force-stopped launcher immediately. Put the stock HOME back before
+        # changing the cold-start fixture, so no process caches the old preferences first.
+        adb('shell','cmd','package','set-home-activity',original_home)
+        adb('shell','am','start','-a','android.intent.action.MAIN','-c','android.intent.category.HOME')
         adb('shell','am','force-stop',PKG)
+        for _ in range(10):
+            if not adb('shell','pidof',PKG)[1].strip():break
+            time.sleep(.5)
+        check('receiverStoppedBeforePauseFixture',not adb('shell','pidof',PKG)[1].strip())
         paused=fixture(device,{'wireless-paused-by-boot-loop':True});write_pref(DE,paused,uid)
-        start(WAIT);wait_text('08-recovery-paused',['Inicio inalámbrico en pausa','Reintentar conexión inalámbrica'])
+        paused_values={n.get('name'):n.get('value') for n in ET.fromstring(adb('shell','cat',DE)[1])}
+        check('pauseFixtureWrittenBeforeStart',paused_values.get('wireless-paused-by-boot-loop')=='true')
+        adb('shell','cmd','package','set-home-activity',ALIAS)
+        start(WAIT);text=wait_text('08-recovery-paused',['Inicio inalámbrico en pausa'])
         check('bootLoopPauseExplained',True)
-        time.sleep(3);check('pauseNotSilentlyCleared','name="wireless-paused-by-boot-loop" value="true"' in adb('shell','cat',DE)[1])
+        if 'Reintentar conexión inalámbrica' not in text:
+            adb('shell','input','swipe','700','430','700','160','350')
+        wait_text('09-explicit-retry-available',['Reintentar conexión inalámbrica'])
+        check('explicitRecoveryActionReachable',True)
+        time.sleep(3)
+        values={n.get('name'):n.get('value') for n in ET.fromstring(adb('shell','cat',DE)[1])}
+        check('pauseNotSilentlyCleared',values.get('wireless-paused-by-boot-loop')=='true')
     finally:
         # Restore HOME first, so Android cannot relaunch Coupé while its private bytes are restored.
         adb('shell','cmd','package','set-home-activity',original_home)
