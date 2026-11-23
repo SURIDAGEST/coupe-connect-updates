@@ -1,7 +1,12 @@
-name: Car deep audit API27
+name: Car deep audit Android
 on:
   workflow_dispatch:
     inputs:
+      api_level:
+        description: Android platform under test
+        type: choice
+        options: ['27', '35']
+        default: '27'
       asset_id:
         description: Draft release candidate APK asset ID
         required: true
@@ -76,12 +81,13 @@ jobs:
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         env:
           CANDIDATE_SHA256: ${{ inputs.apk_sha256 }}
+          EXPECTED_API: ${{ inputs.api_level }}
           MAP_PICKER_ID: ${{ inputs.map_picker_id }}
         with:
-          api-level: 27
-          target: default
+          api-level: ${{ inputs.api_level }}
+          target: ${{ inputs.api_level == '35' && 'google_apis' || 'default' }}
           arch: x86_64
-          ram-size: 1024M
+          ram-size: ${{ inputs.api_level == '35' && '2048M' || '1024M' }}
           emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect -feature -Vulkan -skin 800x480
           script: python3 tests/car_deep_smoke.py
       - name: Preserve actual runtime evidence
