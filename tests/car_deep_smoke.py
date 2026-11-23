@@ -193,7 +193,9 @@ def main():
             time.sleep(1)
         else:raise AssertionError('HOME fixture was not persisted')
         (v.OUT/'package-restrictions-before-boot.xml').write_text(restrictions,encoding='utf-8')
-        (v.OUT/'roles-before-boot.xml').write_text(system_xml('/data/system/users/0/roles.xml'),encoding='utf-8') if sdk>=29 else None
+        # Role storage moved into the permission module on modern Android.
+        # Use the service diagnostic rather than assuming a private XML location.
+        if sdk>=29:v.save('roles-before-boot.json',v.adb('shell','dumpsys','role'))
         (v.OUT/'package-before-boot.txt').write_text(v.adb('shell','dumpsys','package',v.PKG)[1],encoding='utf-8')
         (v.OUT/'pre-reboot-logcat.txt').write_text(v.adb('logcat','-d')[1],encoding='utf-8')
         v.restart()
@@ -202,7 +204,7 @@ def main():
             time.sleep(1)
         v.save('home-after-boot.json',v.home())
         (v.OUT/'package-after-boot.txt').write_text(v.adb('shell','dumpsys','package',v.PKG)[1],encoding='utf-8')
-        (v.OUT/'roles-after-boot.xml').write_text(system_xml('/data/system/users/0/roles.xml'),encoding='utf-8') if sdk>=29 else None
+        if sdk>=29:v.save('roles-after-boot.json',v.adb('shell','dumpsys','role'))
         (v.OUT/'package-restrictions-after-boot.xml').write_text(system_xml('/data/system/users/0/package-restrictions.xml'),encoding='utf-8')
         v.check('homeSurvivesRealVirtualReboot',v.home()==v.ALIAS)
         v.check('bootOpensUnifiedDesktop',foreground_desktop('07-desktop-after-reboot'))
