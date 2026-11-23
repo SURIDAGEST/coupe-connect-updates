@@ -4,6 +4,13 @@ import json
 import re
 
 strict_wait=base.wait_ui
+original_start=base.start
+def explicit_start(component,*extras):
+    # Shell launches of private activities can leave Settings above the local desktop's task.
+    # Ask Android explicitly to show the named desktop, rather than accepting a brought-forward task.
+    if component=='com.coupe.connect.MainActivity':extras=('--activity-clear-top',*extras)
+    return original_start(component,*extras)
+base.start=explicit_start
 webview_evidence={}
 def actual_ui(name,needles,attempts=8):
     if not name.startswith('dashboard'):return strict_wait(name,needles,attempts)
@@ -20,6 +27,7 @@ def actual_ui(name,needles,attempts=8):
                 base.save('webview-inspection.json',webview_evidence)
                 return root
         base.time.sleep(1)
+    base.screenshot(name)
     raise AssertionError('Expected actual native WebView absent: '+name)
 
 base.wait_ui=actual_ui
@@ -37,7 +45,8 @@ def main():
     base.check('noFalseProjectionClaim','sin sesión confirmada' in visible and 'proyección: ACTIVA' not in visible)
     base.check('diagnosticsNativeNoWebView',not any(n.get('class')=='android.webkit.WebView' for n in root.iter('node')))
     base.adb('shell','am','force-stop','com.coupe.connect')
-    base.start('com.andrerinas.openheadunit.main.SettingsActivity')
+    # Pin the destination to the compiled settings fragment; do not restore the coordinate picker.
+    base.start('com.andrerinas.openheadunit.main.SettingsActivity','--ei','extra_destination',str(0x7f090386))
     root=base.wait_ui('diagnostics-settings-entry',['Comprobar conexión'])
     nodes=[n for n in root.iter('node') if n.get('text')=='Comprobar conexión']
     base.check('diagnosticsSettingsEntryVisible',bool(nodes))
