@@ -62,6 +62,14 @@ def stop_for_fixture(stock):
         time.sleep(.5)
     raise AssertionError('The receiver did not stop before the AVD fixture')
 
+def system_xml(path):
+    # API31+ commonly stores system XML as ABX. Decode without modifying it.
+    result=v.adb('shell','cat',path)
+    if result[0]==0 and result[1].startswith('ABX'):
+        result=v.adb('shell','abx2xml',path,'-')
+    assert result[0]==0,(path,result)
+    return result[1]
+
 def main():
     v.check('emulatorOnly',v.adb('shell','getprop','ro.kernel.qemu')[1].strip()=='1')
     sdk=int(v.adb('shell','getprop','ro.build.version.sdk')[1].strip())
@@ -174,7 +182,8 @@ def main():
         v.start(v.WAIT);v.check('homeFixtureLaunchedBeforeReboot',foreground_desktop('06i-selected-home'))
         # Wait for PackageManager to persist HOME before the actual virtual reboot.
         for _ in range(25):
-            restrictions=v.adb('shell','cat','/data/system/users/0/package-restrictions.xml')[1]
+            restrictions=system_xml('/data/system/users/0/package-restrictions.xml')
+            (v.OUT/'package-restrictions-before-boot.xml').write_text(restrictions,encoding='utf-8')
             try:
                 packages=ET.fromstring(restrictions)
                 package=next(p for p in packages.findall('pkg') if p.get('name')==v.PKG)
@@ -184,7 +193,7 @@ def main():
             time.sleep(1)
         else:raise AssertionError('HOME fixture was not persisted')
         (v.OUT/'package-restrictions-before-boot.xml').write_text(restrictions,encoding='utf-8')
-        (v.OUT/'roles-before-boot.xml').write_text(v.adb('shell','cat','/data/system/users/0/roles.xml')[1],encoding='utf-8')
+        (v.OUT/'roles-before-boot.xml').write_text(system_xml('/data/system/users/0/roles.xml'),encoding='utf-8') if sdk>=29 else None
         (v.OUT/'package-before-boot.txt').write_text(v.adb('shell','dumpsys','package',v.PKG)[1],encoding='utf-8')
         (v.OUT/'pre-reboot-logcat.txt').write_text(v.adb('logcat','-d')[1],encoding='utf-8')
         v.restart()
@@ -193,7 +202,8 @@ def main():
             time.sleep(1)
         v.save('home-after-boot.json',v.home())
         (v.OUT/'package-after-boot.txt').write_text(v.adb('shell','dumpsys','package',v.PKG)[1],encoding='utf-8')
-        (v.OUT/'roles-after-boot.xml').write_text(v.adb('shell','cat','/data/system/users/0/roles.xml')[1],encoding='utf-8')
+        (v.OUT/'roles-after-boot.xml').write_text(system_xml('/data/system/users/0/roles.xml'),encoding='utf-8') if sdk>=29 else None
+        (v.OUT/'package-restrictions-after-boot.xml').write_text(system_xml('/data/system/users/0/package-restrictions.xml'),encoding='utf-8')
         v.check('homeSurvivesRealVirtualReboot',v.home()==v.ALIAS)
         v.check('bootOpensUnifiedDesktop',foreground_desktop('07-desktop-after-reboot'))
         services=v.adb('shell','dumpsys','activity','services',v.PKG)[1];(v.OUT/'services-after-boot.txt').write_text(services)
