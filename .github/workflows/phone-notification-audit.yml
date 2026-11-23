@@ -9,7 +9,8 @@ on:
 permissions:
   contents: read
 jobs:
-  fetch:
+  android:
+    timeout-minutes: 20
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -40,22 +41,9 @@ jobs:
           assert hashlib.sha256(data).hexdigest()=='566e291af9808ab36fb107e786cd157fc0f7858053cc9702691a5b43e6035302'
           pathlib.Path('baseline.apk').write_bytes(data)
           PY
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: phone-inputs
-          path: '*.apk'
-          retention-days: 1
-  android:
-    needs: fetch
-    runs-on: ubuntu-22.04
-    timeout-minutes: 20
-    steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: phone-inputs
       - run: sudo chmod 666 /dev/kvm
       - uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         env:

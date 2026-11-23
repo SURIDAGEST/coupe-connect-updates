@@ -36,7 +36,7 @@ def main():
     result=v.adb('install','--no-streaming','-r','probe.apk',timeout=120);v.save('probe-install.json',result)
     v.check('privateProbeInstalled',result[0]==0 and 'Success' in result[1])
     try:
-        result=v.adb('shell','am','instrument','-w','-r','com.coupe.phone.audit/com.coupe.phone.audit.NotificationProbe',timeout=120)
+        result=v.adb('shell','am','instrument','-w','-r','com.coupe.phone.audit/com.coupe.phone.audit.PhoneNotificationProbe',timeout=120)
         v.save('instrumentation.json',result)
         v.check('exactAppNotificationInstrumentationPassed',result[0]==0 and 'passed=true' in result[1] and 'targetVersionCode=20' in result[1])
         v.check('actualNotificationPosted','actualConnectedNotificationPosted=true' in result[1])
