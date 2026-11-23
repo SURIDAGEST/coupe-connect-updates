@@ -113,7 +113,8 @@ def main():
         v.check('upgradeInstalled',result[0]==0 and 'Success' in result[1])
         v.check('preferencesUnchangedByUpgrade',v.adb('shell','cat',v.CE)[1].encode('utf-8')==fixture and v.adb('shell','cat',v.DE)[1].encode('utf-8')==device)
         package=v.adb('shell','dumpsys','package',v.PKG)[1];(v.OUT/'package.txt').write_text(package)
-        v.check('version23AndMin27','versionCode=23' in package and 'minSdk=27' in package)
+        version=int(os.environ.get('EXPECTED_VERSION_CODE','23'))
+        v.check('versionCodeAndMin27',bool(re.search(r'\bversionCode='+str(version)+r'\b',package)) and 'minSdk=27' in package)
         v.adb('shell','pm','grant',v.PKG,'android.permission.ACCESS_COARSE_LOCATION')
         v.adb('shell','pm','grant',v.PKG,'android.permission.ACCESS_FINE_LOCATION')
         if sdk>=31:

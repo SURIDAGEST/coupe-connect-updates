@@ -13,6 +13,9 @@ on:
       apk_sha256:
         description: Exact candidate SHA-256
         required: true
+      version_code:
+        description: Expected installed candidate versionCode
+        default: '23'
       map_picker_id:
         description: Compiled native coordinate destination ID
         default: '0x7f0901ed'
@@ -82,6 +85,7 @@ jobs:
         env:
           CANDIDATE_SHA256: ${{ inputs.apk_sha256 }}
           EXPECTED_API: ${{ inputs.api_level }}
+          EXPECTED_VERSION_CODE: ${{ inputs.version_code }}
           MAP_PICKER_ID: ${{ inputs.map_picker_id }}
         with:
           api-level: ${{ inputs.api_level }}
