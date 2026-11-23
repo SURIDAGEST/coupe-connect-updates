@@ -76,11 +76,17 @@ def main():
     v.adb('logcat','-c')
     stock=v.home();v.start(v.WAIT);time.sleep(4)
     # Android 15 prints appId where API27 printed userId (this AVD runs user 0).
-    package_before=v.adb('shell','dumpsys','package',v.PKG)[1]
-    (v.OUT/'package-before-fixture.txt').write_text(package_before,encoding='utf-8')
-    app_id=re.search(r'\b(?:userId|appId)=(\d+)',package_before)
-    assert app_id is not None,'PackageManager did not expose the application UID; no preference fixture written'
-    uid=int(app_id.group(1));v.check('applicationUidVerified',10000<=uid<20000)
+    uid=None;probes=[]
+    for _ in range(15):
+        listing=v.adb('shell','cmd','package','list','packages','-U',v.PKG)
+        app_id=re.search(r'(?m)^package:'+re.escape(v.PKG)+r'\s+uid:(\d+)\s*$',listing[1])
+        probes.append({'exitCode':listing[0],'stderr':listing[2][:400],'foundExactPackageUid':app_id is not None})
+        if listing[0]==0 and app_id is not None:uid=int(app_id.group(1));break
+        time.sleep(1)
+    v.save('package-uid-probes.json',probes)
+    assert uid is not None,'PackageManager did not expose the exact application UID; no preference fixture written'
+    (v.OUT/'package-before-fixture.txt').write_text(v.adb('shell','dumpsys','package',v.PKG)[1],encoding='utf-8')
+    v.check('applicationUidVerified',10000<=uid<20000)
     stop_for_fixture(stock)
     ce=v.adb('shell','cat',v.CE);de=v.adb('shell','cat',v.DE)
     original_ce=ce[1].encode('utf-8') if ce[0]==0 else None
