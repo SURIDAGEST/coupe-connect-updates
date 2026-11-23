@@ -210,7 +210,13 @@ def main():
         v.check('bootOpensUnifiedDesktop',foreground_desktop('07-desktop-after-reboot'))
         services=v.adb('shell','dumpsys','activity','services',v.PKG)[1];(v.OUT/'services-after-boot.txt').write_text(services)
         v.check('receiverRunsBehindDesktop','AapService' in services)
-        if sdk>=29:v.check('bootUsesConnectedDeviceType','foregroundServiceType=0x00000010' in services or 'foregroundServiceType=0x10' in services)
+        if sdk>=29:
+            # Android 15 prints "types=" on the foreground record; older releases
+            # print "foregroundServiceType=". Require the receiver's own record.
+            records=re.split(r'(?m)^  \* ServiceRecord',services)
+            record=next((r for r in records if 'com.andrerinas.openheadunit.aap.AapService' in r),'')
+            mask=re.search(r'isForeground=true[^\n]*\b(?:foregroundServiceType|types)=0x([0-9a-fA-F]+)\b',record)
+            v.check('bootUsesConnectedDeviceType',mask is not None and int(mask.group(1),16)==16)
         values=ET.fromstring(v.adb('shell','cat',v.CE)[1]);v.check('dataSentinelSurvivesBoot',any(n.get('name')=='coupe-ui1-upgrade-sentinel' and n.text==sentinel.text for n in values))
         for width,height in [(1024,600),(640,360),(800,480)]:
             v.adb('shell','wm','size',str(width)+'x'+str(height));v.start(v.WAIT)
