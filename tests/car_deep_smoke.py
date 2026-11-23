@@ -52,7 +52,12 @@ def main():
     v.adb('shell','settings','put','system','accelerometer_rotation','0');v.adb('shell','settings','put','system','user_rotation','0')
     v.adb('logcat','-c')
     stock=v.home();v.start(v.WAIT);time.sleep(4)
-    uid=int(re.search(r'userId=(\d+)',v.adb('shell','dumpsys','package',v.PKG)[1]).group(1))
+    # Android 15 prints appId where API27 printed userId (this AVD runs user 0).
+    package_before=v.adb('shell','dumpsys','package',v.PKG)[1]
+    (v.OUT/'package-before-fixture.txt').write_text(package_before,encoding='utf-8')
+    app_id=re.search(r'\b(?:userId|appId)=(\d+)',package_before)
+    assert app_id is not None,'PackageManager did not expose the application UID; no preference fixture written'
+    uid=int(app_id.group(1));v.check('applicationUidVerified',10000<=uid<20000)
     stop_for_fixture(stock)
     ce=v.adb('shell','cat',v.CE);de=v.adb('shell','cat',v.DE)
     original_ce=ce[1].encode('utf-8') if ce[0]==0 else None
