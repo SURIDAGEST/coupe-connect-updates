@@ -15,6 +15,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
       - name: Fetch hash-bound private audit packages
         env:
           GH_TOKEN: ${{ github.token }}
@@ -41,9 +44,6 @@ jobs:
           assert hashlib.sha256(data).hexdigest()=='566e291af9808ab36fb107e786cd157fc0f7858053cc9702691a5b43e6035302'
           pathlib.Path('baseline.apk').write_bytes(data)
           PY
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
       - run: sudo chmod 666 /dev/kvm
       - uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         env:
