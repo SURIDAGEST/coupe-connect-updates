@@ -72,6 +72,11 @@ def main():
     b.check('noFalseProjectionClaim','sin sesión confirmada' in visible and 'proyección: ACTIVA' not in visible)
     b.check('diagnosticsNativeNoWebView',not any(n.get('class')=='android.webkit.WebView' for n in root.iter('node')))
     start('com.andrerinas.openheadunit.main.SettingsActivity','--ei','extra_destination',str(0x7f090386))
+    root=b.wait_ui('diagnostics-settings-root',['Advanced','Avanzada','Avanzado'])
+    tabs=[n for n in root.iter('node') if (n.get('text') or n.get('content-desc','')).strip().lower() in ['advanced','avanzada','avanzado']]
+    assert tabs,'Advanced settings tab absent'
+    tab=list(map(int,re.findall(r'\d+',tabs[0].get('bounds',''))));assert len(tab)==4
+    b.adb('shell','input','tap',(tab[0]+tab[2])//2,(tab[1]+tab[3])//2)
     root=b.wait_ui('diagnostics-settings-entry',['Comprobar conexión'])
     nodes=[n for n in root.iter('node') if n.get('text')=='Comprobar conexión'];b.check('diagnosticsSettingsEntryVisible',bool(nodes))
     bounds=list(map(int,re.findall(r'\d+',nodes[0].get('bounds',''))));assert len(bounds)==4
