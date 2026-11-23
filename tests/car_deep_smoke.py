@@ -20,7 +20,7 @@ v.start=start
 
 def foreground_desktop(name):
     for _ in range(25):
-        windows=v.adb('shell','dumpsys','window','windows')[1]
+        windows=v.adb('shell','dumpsys','window')[1]
         focused='\n'.join(s for s in windows.splitlines() if 'mCurrentFocus' in s)
         if _ % 5 == 0 or 'com.android.systemui' in focused or 'ImmersiveModeConfirmation' in focused:
             # First immersive launch presents Android's own education dialog on API35.
@@ -30,7 +30,7 @@ def foreground_desktop(name):
             if tip.exists():
                 nodes=list(ET.fromstring(tip.read_text(encoding='utf-8')).iter('node'))
                 if any(n.get('text')=='Viewing full screen' for n in nodes):
-                    button=next((n for n in nodes if n.get('text')=='Got it' and n.get('package')=='com.android.systemui'),None)
+                    button=next((n for n in nodes if n.get('text')=='Got it' and n.get('package') in ('android','com.android.systemui')),None)
                     if button is not None:
                         bounds=list(map(int,re.findall(r'\d+',button.get('bounds',''))));assert len(bounds)==4
                         v.adb('shell','input','tap',(bounds[0]+bounds[2])//2,(bounds[1]+bounds[3])//2)
@@ -125,7 +125,7 @@ def main():
         v.start(v.WAIT);v.check('desktopBeforeInternet',foreground_desktop('06b-before-internet'))
         v.adb('shell','am','start-foreground-service','-n',SERVICE,'-a','com.coupe.connect.USE_INTERNET')
         for _ in range(20):
-            focus=v.adb('shell','dumpsys','window','windows')[1]
+            focus=v.adb('shell','dumpsys','window')[1]
             if any('mCurrentFocus' in line and 'com.android.settings' in line for line in focus.splitlines()):break
             time.sleep(.5)
         else:raise AssertionError('Wi-Fi settings did not open after receiver acknowledgement')
@@ -140,7 +140,7 @@ def main():
         v.adb('shell','am','start','--activity-clear-top','-n',v.WAIT,'--ez','configureHome','true')
         # configureHome is the explicit in-app user request and immediately opens Android's chooser.
         time.sleep(2)
-        focus=v.adb('shell','dumpsys','window','windows')[1]
+        focus=v.adb('shell','dumpsys','window')[1]
         v.check('officialHomeChooserOpened',any('mCurrentFocus' in line and ('com.android.settings' in line or 'permissioncontroller' in line) for line in focus.splitlines()))
         v.shot('06g-official-home-chooser');v.adb('shell','input','keyevent','4')
         v.wait_text('06h-after-home-cancel',['Encender con Coupé'])
