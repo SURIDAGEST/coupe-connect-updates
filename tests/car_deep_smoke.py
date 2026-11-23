@@ -86,6 +86,8 @@ def main():
         v.write_pref(v.CE,fixture,uid)
         device=v.fixture(original_de,{'auto-start-on-boot':True,'auto-start-on-boot-in-background':False,'auto-start-on-screen-on':True,'wireless-paused-by-boot-loop':False})
         v.write_pref(v.DE,device,uid)
+        (v.OUT/'baseline-logcat.txt').write_text(v.adb('logcat','-d')[1],encoding='utf-8')
+        v.adb('logcat','-c') # candidate attribution begins before package replacement broadcasts
         result=v.adb('install','--no-streaming','-r','candidate.apk',timeout=120);v.save('candidate-install.json',result)
         v.check('upgradeInstalled',result[0]==0 and 'Success' in result[1])
         v.check('preferencesUnchangedByUpgrade',v.adb('shell','cat',v.CE)[1].encode('utf-8')==fixture and v.adb('shell','cat',v.DE)[1].encode('utf-8')==device)
@@ -136,11 +138,8 @@ def main():
         # Exercise the user's actual HOME cancellation route, not just a forced HOME fixture.
         v.adb('shell','pm','disable',v.ALIAS)
         v.adb('shell','am','start','--activity-clear-top','-n',v.WAIT,'--ez','configureHome','true')
-        v.wait_text('06f-home-setup',['Encender con Coupé','Usar Coupé como inicio'])
-        setup_xml=ET.fromstring((v.OUT/'06f-home-setup.xml').read_text(encoding='utf-8'))
-        button=next(n for n in setup_xml.iter('node') if n.get('text')=='Usar Coupé como inicio')
-        bounds=list(map(int,re.findall(r'\d+',button.get('bounds',''))));assert len(bounds)==4
-        v.adb('shell','input','tap',(bounds[0]+bounds[2])//2,(bounds[1]+bounds[3])//2);time.sleep(2)
+        # configureHome is the explicit in-app user request and immediately opens Android's chooser.
+        time.sleep(2)
         focus=v.adb('shell','dumpsys','window','windows')[1]
         v.check('officialHomeChooserOpened',any('mCurrentFocus' in line and ('com.android.settings' in line or 'permissioncontroller' in line) for line in focus.splitlines()))
         v.shot('06g-official-home-chooser');v.adb('shell','input','keyevent','4')
@@ -157,6 +156,7 @@ def main():
             if 'CarLauncherAlias' in v.adb('shell','cat','/data/system/users/0/package-restrictions.xml')[1]:break
             time.sleep(1)
         else:raise AssertionError('HOME fixture was not persisted')
+        (v.OUT/'pre-reboot-logcat.txt').write_text(v.adb('logcat','-d')[1],encoding='utf-8')
         v.restart();v.check('homeSurvivesRealVirtualReboot',v.home()==v.ALIAS)
         v.check('bootOpensUnifiedDesktop',foreground_desktop('07-desktop-after-reboot'))
         services=v.adb('shell','dumpsys','activity','services',v.PKG)[1];(v.OUT/'services-after-boot.txt').write_text(services)
@@ -177,16 +177,24 @@ def main():
             'originalCeBytesRestored':(final_ce[0]!=0 if original_ce is None else final_ce[1].encode('utf-8')==original_ce),
             'originalDeBytesRestored':(final_de[0]!=0 if original_de is None else final_de[1].encode('utf-8')==original_de)})
         (v.OUT/'final-logcat.txt').write_text(v.adb('logcat','-d')[1],encoding='utf-8')
-    log=(v.OUT/'final-logcat.txt').read_text(encoding='utf-8')
+    before=v.OUT/'pre-reboot-logcat.txt'
+    log=(before.read_text(encoding='utf-8') if before.exists() else '')+(v.OUT/'final-logcat.txt').read_text(encoding='utf-8')
     fatal=bool(re.search(r'FATAL EXCEPTION[^\n]*\n(?:.*\n){0,5}.*Process: com\.coupe\.connect',log));anr='ANR in com.coupe.connect' in log
     v.check('noOwnFatal',not fatal);v.check('noOwnAnr',not anr)
     restoration=json.loads((v.OUT/'restoration.json').read_text());v.check('restorationComplete',all(restoration.values()))
     v.save('result.json',{'passed':True,'candidateSha256':expected,'checks':v.CHECKS,
         'postRunErrors':{'ownFatal':fatal,'ownAnr':anr},'physicalRadioTested':False,'phoneSessionTested':False,
-        'sdk':sdk,'scope':'Actual emulator upgrade, WebView, diagnostics, no-phone connect/cancel/Internet commands, HOME reboot and AVD data preservation. No real phone or radio transport.'})
+        'sdk':sdk,'logScope':'Candidate installation through reboot; pre- and post-reboot logs',
+        'scope':'Actual emulator upgrade, WebView, diagnostics, no-phone connect/cancel/Internet commands, HOME reboot and AVD data preservation. No real phone or radio transport.'})
 
 if __name__=='__main__':
     try:main()
     except Exception:
         v.save('result.json',{'passed':False,'checks':v.CHECKS});raise
-    finally:(v.OUT/'final-logcat.txt').write_text(v.adb('logcat','-d')[1],encoding='utf-8')
+    finally:
+        (v.OUT/'final-logcat.txt').write_text(v.adb('logcat','-d')[1],encoding='utf-8')
+        for name in v.adb('shell','ls','/data/anr')[1].split():
+            if not re.fullmatch(r'anr_[A-Za-z0-9._-]+',name):continue
+            trace=v.adb('shell','cat','/data/anr/'+name)[1]
+            if 'Cmd line: com.coupe.connect' in trace or 'Cmdline: com.coupe.connect' in trace:
+                (v.OUT/(name+'.txt')).write_text(trace,encoding='utf-8')
