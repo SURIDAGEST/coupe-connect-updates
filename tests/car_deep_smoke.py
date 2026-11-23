@@ -46,8 +46,15 @@ def foreground_desktop(name):
     (v.OUT/(name+'-views.txt')).write_text(activity,encoding='utf-8')
     v.shot(name);return False
 
+def select_home(component):
+    if int(v.adb('shell','getprop','ro.build.version.sdk')[1])>=29:
+        # A preferred Activity alone is overwritten by RoleManager at boot on modern Android.
+        role=v.adb('shell','cmd','role','add-role-holder','--user','0','android.app.role.HOME',component.split('/')[0],'0')
+        assert role[0]==0,role
+    return v.adb('shell','cmd','package','set-home-activity',component)
+
 def stop_for_fixture(stock):
-    v.adb('shell','cmd','package','set-home-activity',stock)
+    select_home(stock)
     v.adb('shell','am','start','-a','android.intent.action.MAIN','-c','android.intent.category.HOME')
     v.adb('shell','am','force-stop',v.PKG)
     for _ in range(12):
@@ -101,6 +108,9 @@ def main():
         if sdk>=33:v.adb('shell','pm','grant',v.PKG,'android.permission.NEARBY_WIFI_DEVICES')
         v.adb('shell','svc','wifi','enable')
         v.start(v.WAIT);v.check('entryOpensUnifiedDesktop',foreground_desktop('01-desktop-from-entry'))
+        for attempt in range(2,6):
+            v.adb('shell','am','force-stop',v.PKG);v.start(v.WAIT)
+            v.check('coldProcessStart'+str(attempt),foreground_desktop('01-cold-start-'+str(attempt)))
         v.start(NATIVE);v.check('engineEntryAlsoReturnsToDesktop',foreground_desktop('01b-desktop-from-engine'))
         # The screen-share entry remains available without implicitly starting capture.
         v.start(v.PKG+'/com.coupe.connect.ScreenShareActivity')
@@ -148,8 +158,12 @@ def main():
         choices=v.adb('shell','cmd','package','query-activities','--brief','-a','android.intent.action.MAIN','-c','android.intent.category.HOME')
         v.save('home-choices-after-cancel.json',choices)
         v.check('homeChooserCancelRestoresDisabledAlias',choices[0]==0 and 'CarLauncherAlias' not in choices[1])
+        # Emulate the preference written only after real HOME acceptance. Fixture, not user consent.
+        stop_for_fixture(stock)
+        fixture_home=v.fixture(v.adb('shell','cat',v.CE)[1].encode('utf-8'),{'enable-car-launcher':True})
+        v.write_pref(v.CE,fixture_home,uid)
         v.adb('shell','pm','enable',v.ALIAS)
-        result=v.adb('shell','cmd','package','set-home-activity',v.ALIAS);v.save('set-home.json',result)
+        result=select_home(v.ALIAS);v.save('set-home.json',result)
         v.check('avdHomeFixture',result[0]==0 and v.home()==v.ALIAS)
         # Wait for PackageManager to persist HOME before the actual virtual reboot.
         for _ in range(25):
@@ -157,7 +171,11 @@ def main():
             time.sleep(1)
         else:raise AssertionError('HOME fixture was not persisted')
         (v.OUT/'pre-reboot-logcat.txt').write_text(v.adb('logcat','-d')[1],encoding='utf-8')
-        v.restart();v.check('homeSurvivesRealVirtualReboot',v.home()==v.ALIAS)
+        v.restart()
+        for _ in range(20):
+            if v.home()==v.ALIAS:break
+            time.sleep(1)
+        v.check('homeSurvivesRealVirtualReboot',v.home()==v.ALIAS)
         v.check('bootOpensUnifiedDesktop',foreground_desktop('07-desktop-after-reboot'))
         services=v.adb('shell','dumpsys','activity','services',v.PKG)[1];(v.OUT/'services-after-boot.txt').write_text(services)
         v.check('receiverRunsBehindDesktop','AapService' in services)
