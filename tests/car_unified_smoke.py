@@ -12,6 +12,12 @@ NATIVE=v.PKG+'/com.andrerinas.openheadunit.main.MainActivity'
 SETTINGS=v.PKG+'/com.andrerinas.openheadunit.main.SettingsActivity'
 SERVICE=v.PKG+'/com.andrerinas.openheadunit.aap.AapService'
 
+def start(component):
+    # am start -W can wait forever for a dispatcher that finishes before drawing,
+    # even though the existing destination is already resumed. Observe that destination.
+    return v.adb('shell','am','start','--activity-clear-top','-n',component)
+v.start=start
+
 def foreground_desktop(name):
     for _ in range(25):
         windows=v.adb('shell','dumpsys','window','windows')[1]
