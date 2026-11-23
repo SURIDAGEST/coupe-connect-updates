@@ -22,12 +22,28 @@ def foreground_desktop(name):
     for _ in range(25):
         windows=v.adb('shell','dumpsys','window','windows')[1]
         focused='\n'.join(s for s in windows.splitlines() if 'mCurrentFocus' in s)
+        if _ % 5 == 0 or 'com.android.systemui' in focused or 'ImmersiveModeConfirmation' in focused:
+            # First immersive launch presents Android's own education dialog on API35.
+            # Acknowledge only this exact system prompt; never bypass app/permission dialogs.
+            v.ui(name+'-system-tip')
+            tip=v.OUT/(name+'-system-tip.xml')
+            if tip.exists():
+                nodes=list(ET.fromstring(tip.read_text(encoding='utf-8')).iter('node'))
+                if any(n.get('text')=='Viewing full screen' for n in nodes):
+                    button=next((n for n in nodes if n.get('text')=='Got it' and n.get('package')=='com.android.systemui'),None)
+                    if button is not None:
+                        bounds=list(map(int,re.findall(r'\d+',button.get('bounds',''))));assert len(bounds)==4
+                        v.adb('shell','input','tap',(bounds[0]+bounds[2])//2,(bounds[1]+bounds[3])//2)
+                        v.check('systemFullscreenTipAcknowledged',True)
+                        continue
         activity=v.adb('shell','dumpsys','activity','top')[1]
         if re.search(r'com\.coupe\.connect/(?:com\.coupe\.connect\.)?MainActivity',focused) and 'android.webkit.WebView{' in activity:
             time.sleep(4)
             (v.OUT/(name+'-views.txt')).write_text(activity,encoding='utf-8')
             v.ui(name);v.shot(name);return True
         time.sleep(1)
+    (v.OUT/(name+'-windows.txt')).write_text(windows,encoding='utf-8')
+    (v.OUT/(name+'-views.txt')).write_text(activity,encoding='utf-8')
     v.shot(name);return False
 
 def stop_for_fixture(stock):
@@ -117,6 +133,22 @@ def main():
         v.adb('shell','am','start-foreground-service','-n',SERVICE,'-a','com.coupe.connect.CANCEL_PHONE')
         time.sleep(1);v.start(v.DIAG);text=v.wait_text('06e-cancel-result',['Resultado de Conectar:'])
         v.check('cancelCommandResponds','cancel_requested' in text)
+        # Exercise the user's actual HOME cancellation route, not just a forced HOME fixture.
+        v.adb('shell','pm','disable',v.ALIAS)
+        v.adb('shell','am','start','--activity-clear-top','-n',v.WAIT,'--ez','configureHome','true')
+        v.wait_text('06f-home-setup',['Encender con Coupé','Usar Coupé como inicio'])
+        setup_xml=ET.fromstring((v.OUT/'06f-home-setup.xml').read_text(encoding='utf-8'))
+        button=next(n for n in setup_xml.iter('node') if n.get('text')=='Usar Coupé como inicio')
+        bounds=list(map(int,re.findall(r'\d+',button.get('bounds',''))));assert len(bounds)==4
+        v.adb('shell','input','tap',(bounds[0]+bounds[2])//2,(bounds[1]+bounds[3])//2);time.sleep(2)
+        focus=v.adb('shell','dumpsys','window','windows')[1]
+        v.check('officialHomeChooserOpened',any('mCurrentFocus' in line and ('com.android.settings' in line or 'permissioncontroller' in line) for line in focus.splitlines()))
+        v.shot('06g-official-home-chooser');v.adb('shell','input','keyevent','4')
+        v.wait_text('06h-after-home-cancel',['Encender con Coupé'])
+        v.check('homeChooserCancelKeepsOriginalHome',v.home()==stock)
+        choices=v.adb('shell','cmd','package','query-activities','--brief','-a','android.intent.action.MAIN','-c','android.intent.category.HOME')
+        v.save('home-choices-after-cancel.json',choices)
+        v.check('homeChooserCancelRestoresDisabledAlias',choices[0]==0 and 'CarLauncherAlias' not in choices[1])
         v.adb('shell','pm','enable',v.ALIAS)
         result=v.adb('shell','cmd','package','set-home-activity',v.ALIAS);v.save('set-home.json',result)
         v.check('avdHomeFixture',result[0]==0 and v.home()==v.ALIAS)
