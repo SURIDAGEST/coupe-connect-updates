@@ -171,16 +171,29 @@ def main():
         v.adb('shell','pm','enable',v.ALIAS)
         result=select_home(v.ALIAS);v.save('set-home.json',result)
         v.check('avdHomeFixture',result[0]==0 and v.home()==v.ALIAS)
+        v.start(v.WAIT);v.check('homeFixtureLaunchedBeforeReboot',foreground_desktop('06i-selected-home'))
         # Wait for PackageManager to persist HOME before the actual virtual reboot.
         for _ in range(25):
-            if 'CarLauncherAlias' in v.adb('shell','cat','/data/system/users/0/package-restrictions.xml')[1]:break
+            restrictions=v.adb('shell','cat','/data/system/users/0/package-restrictions.xml')[1]
+            try:
+                packages=ET.fromstring(restrictions)
+                package=next(p for p in packages.findall('pkg') if p.get('name')==v.PKG)
+                enabled=package.find('enabled-components')
+                if enabled is not None and any(n.get('name')==v.ALIAS.split('/')[1] for n in enabled):break
+            except (ET.ParseError,StopIteration):pass
             time.sleep(1)
         else:raise AssertionError('HOME fixture was not persisted')
+        (v.OUT/'package-restrictions-before-boot.xml').write_text(restrictions,encoding='utf-8')
+        (v.OUT/'roles-before-boot.xml').write_text(v.adb('shell','cat','/data/system/users/0/roles.xml')[1],encoding='utf-8')
+        (v.OUT/'package-before-boot.txt').write_text(v.adb('shell','dumpsys','package',v.PKG)[1],encoding='utf-8')
         (v.OUT/'pre-reboot-logcat.txt').write_text(v.adb('logcat','-d')[1],encoding='utf-8')
         v.restart()
         for _ in range(20):
             if v.home()==v.ALIAS:break
             time.sleep(1)
+        v.save('home-after-boot.json',v.home())
+        (v.OUT/'package-after-boot.txt').write_text(v.adb('shell','dumpsys','package',v.PKG)[1],encoding='utf-8')
+        (v.OUT/'roles-after-boot.xml').write_text(v.adb('shell','cat','/data/system/users/0/roles.xml')[1],encoding='utf-8')
         v.check('homeSurvivesRealVirtualReboot',v.home()==v.ALIAS)
         v.check('bootOpensUnifiedDesktop',foreground_desktop('07-desktop-after-reboot'))
         services=v.adb('shell','dumpsys','activity','services',v.PKG)[1];(v.OUT/'services-after-boot.txt').write_text(services)
