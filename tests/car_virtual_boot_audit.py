@@ -148,13 +148,30 @@ def main():
         adb('shell','cmd','package','set-home-activity',ALIAS)
         start(WAIT);text=wait_text('08-recovery-paused',['Inicio inalámbrico en pausa'])
         check('bootLoopPauseExplained',True)
-        if 'Reintentar conexión inalámbrica' not in text:
-            adb('shell','input','swipe','700','430','700','160','350')
-        wait_text('09-explicit-retry-available',['Reintentar conexión inalámbrica'])
-        check('explicitRecoveryActionReachable',True)
+        retry_bounds=None
+        for _ in range(8):
+            ui('09-explicit-retry-available')
+            path=OUT/'09-explicit-retry-available.xml'
+            if path.exists():
+                nodes=[n for n in ET.parse(path).getroot().iter('node') if n.get('text')=='Reintentar conexión inalámbrica']
+                if nodes:
+                    bounds=list(map(int,re.findall(r'\d+',nodes[0].get('bounds',''))))
+                    if len(bounds)==4 and bounds[3]-bounds[1]>=48 and bounds[2]-bounds[0]>=100:
+                        retry_bounds=bounds;break
+            adb('shell','input','swipe','700','430','700','160','350');time.sleep(.5)
+        shot('09-explicit-retry-available')
+        check('explicitRecoveryActionFullyVisible',retry_bounds is not None)
         time.sleep(3)
         values={n.get('name'):n.get('value') for n in ET.fromstring(adb('shell','cat',DE)[1])}
         check('pauseNotSilentlyCleared',values.get('wireless-paused-by-boot-loop')=='true')
+        adb('shell','input','tap',(retry_bounds[0]+retry_bounds[2])//2,(retry_bounds[1]+retry_bounds[3])//2)
+        for _ in range(15):
+            values={n.get('name'):n.get('value') for n in ET.fromstring(adb('shell','cat',DE)[1])}
+            if values.get('wireless-paused-by-boot-loop')=='false':break
+            time.sleep(.5)
+        check('explicitUserRetryClearsPause',values.get('wireless-paused-by-boot-loop')=='false')
+        text=ui('10-after-user-retry');shot('10-after-user-retry')
+        check('retryDoesNotInventPhoneSession','Sesión Android Auto activa' not in text)
     finally:
         # Restore HOME first, so Android cannot relaunch Coupé while its private bytes are restored.
         adb('shell','cmd','package','set-home-activity',original_home)
