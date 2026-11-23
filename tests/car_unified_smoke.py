@@ -67,6 +67,7 @@ def main():
         v.adb('shell','pm','grant',v.PKG,'android.permission.ACCESS_FINE_LOCATION')
         v.adb('shell','svc','wifi','enable')
         v.start(v.WAIT);v.check('entryOpensUnifiedDesktop',foreground_desktop('01-desktop-from-entry'))
+        v.start(NATIVE);v.check('engineEntryAlsoReturnsToDesktop',foreground_desktop('01b-desktop-from-engine'))
         v.start(v.DIAG);text=v.wait_text('02-live-diagnostics',['Bluetooth visible en Android:','Configurado:'])
         v.check('actualReceiverResponds','API 27' in text and 'Paso actual:' in text)
         v.check('noInventedPhoneSession','sin sesión confirmada' in text and 'proyección: ACTIVA' not in text)
