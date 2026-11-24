@@ -1,0 +1,64 @@
+name: Phone discovery audit API36
+on:
+  workflow_dispatch:
+    inputs:
+      phone_asset_id: {required: true}
+      phone_sha256: {required: true}
+      probe_asset_id: {required: true}
+      probe_sha256: {required: true}
+permissions:
+  contents: read
+jobs:
+  android:
+    timeout-minutes: 20
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Fetch hash-bound private audit packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PHONE_ID: ${{ inputs.phone_asset_id }}
+          PHONE_SHA: ${{ inputs.phone_sha256 }}
+          PROBE_ID: ${{ inputs.probe_asset_id }}
+          PROBE_SHA: ${{ inputs.probe_sha256 }}
+        run: |
+          python3 - <<'PY'
+          import os,urllib.request,urllib.error,urllib.parse,pathlib,hashlib,re
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self,*args):return None
+          for name,prefix in [('candidate.apk','PHONE'),('probe.apk','PROBE')]:
+              asset=os.environ[prefix+'_ID'];expected=os.environ[prefix+'_SHA'];assert asset.isdigit() and re.fullmatch('[0-9a-f]{64}',expected)
+              req=urllib.request.Request('https://api.github.com/repos/SURIDAGEST/coupe-connect-updates/releases/assets/'+asset,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/octet-stream'})
+              try:data=urllib.request.build_opener(NoRedirect).open(req,timeout=60).read(50000000)
+              except urllib.error.HTTPError as e:
+                  assert e.code in (301,302,303,307,308)
+                  target=e.headers['Location'];assert urllib.parse.urlsplit(target).scheme=='https'
+                  data=urllib.request.urlopen(target,timeout=60).read(50000000)
+              assert hashlib.sha256(data).hexdigest()==expected
+              pathlib.Path(name).write_bytes(data)
+          data=urllib.request.urlopen('https://github.com/SURIDAGEST/coupe-connect-updates/releases/download/v2026.11.23-car24-phone19-auto1-test/phone-19-566e291af9808ab36fb107e786cd157fc0f7858053cc9702691a5b43e6035302.apk',timeout=60).read(50000000)
+          assert hashlib.sha256(data).hexdigest()=='566e291af9808ab36fb107e786cd157fc0f7858053cc9702691a5b43e6035302'
+          pathlib.Path('baseline.apk').write_bytes(data)
+          PY
+      - run: sudo chmod 666 /dev/kvm
+      - uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        env:
+          PHONE_SHA256: ${{ inputs.phone_sha256 }}
+          PROBE_SHA256: ${{ inputs.probe_sha256 }}
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          ram-size: 2048M
+          emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect -feature -Vulkan -skin 480x900
+          script: python3 tests/phone_discovery_smoke.py
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: phone-discovery-${{ github.run_id }}
+          path: audit/
+          retention-days: 30
