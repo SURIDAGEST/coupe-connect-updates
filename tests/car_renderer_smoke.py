@@ -96,7 +96,10 @@ def main():
     assert "versionCode='"+str(version)+"'" in badging.splitlines()[0]
     assert 'application-debuggable' not in badging,'Production candidate must not be debuggable'
     verify_apk(probe,os.environ['PROBE_SHA256'],PROBE,signer,sdk_tools)
-    adb('root');adb('wait-for-device')
+    # Root restarts adbd on these userdebug images and can close its own transport.
+    # Verify the resulting guest UID rather than treating that expected disconnect as a test result.
+    adb('root',required=False);adb('wait-for-device')
+    assert adb('shell','id','-u')[1].strip()=='0','Root required on the isolated emulator'
     adb('install','--no-streaming','-r',candidate,timeout=180)
     adb('install','--no-streaming','-r',probe,timeout=180)
     # Offline is an explicit emulator fixture; no real maps or network session is claimed.
@@ -133,4 +136,12 @@ def main():
         (OUT/'logcat.txt').write_text(logs+'\n'+error,encoding='utf-8')
         _,processes,_=adb('shell','ps','-A',required=False);(OUT/'processes.txt').write_text(processes,encoding='utf-8')
 
-if __name__=='__main__':main()
+if __name__=='__main__':
+    try:main()
+    except BaseException as failure:
+        save('host-failure.json',{'passed':False,'failure':repr(failure),'serial':SERIAL})
+        raise
+    finally:
+        if SERIAL and not (OUT/'logcat.txt').exists():
+            try:(OUT/'logcat.txt').write_text(adb('logcat','-d','-v','threadtime',required=False)[1],encoding='utf-8')
+            except Exception:pass
