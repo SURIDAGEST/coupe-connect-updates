@@ -1,103 +1,74 @@
-name: Car deep audit Android
+name: Private Car renderer recovery audit
 on:
   workflow_dispatch:
     inputs:
       api_level:
-        description: Android platform under test
         type: choice
         options: ['27', '35']
         default: '27'
-      asset_id:
-        description: Draft release candidate APK asset ID
         required: true
-      apk_sha256:
-        description: Exact candidate SHA-256
-        required: true
-      version_code:
-        description: Expected installed candidate versionCode
-        default: '23'
-      map_picker_id:
-        description: Compiled native coordinate destination ID
-        default: '0x7f0901ed'
-        required: true
+      car_asset_id: {required: true}
+      car_sha256: {required: true}
+      probe_asset_id: {required: true}
+      probe_sha256: {required: true}
+      signer_sha256: {required: true}
+      version_code: {default: '25', required: true}
 permissions:
   contents: read
 jobs:
-  fetchCandidate:
+  android:
     runs-on: ubuntu-22.04
-    timeout-minutes: 5
+    timeout-minutes: 25
     permissions:
       contents: write
     steps:
-      - name: Download hash-bound candidate and regression baseline
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Fetch hash-bound private inputs without forwarding authorization
         env:
           GH_TOKEN: ${{ github.token }}
-          ASSET_ID: ${{ inputs.asset_id }}
-          EXPECTED_SHA256: ${{ inputs.apk_sha256 }}
+          CAR_ID: ${{ inputs.car_asset_id }}
+          CAR_SHA: ${{ inputs.car_sha256 }}
+          PROBE_ID: ${{ inputs.probe_asset_id }}
+          PROBE_SHA: ${{ inputs.probe_sha256 }}
         run: |
           python3 - <<'PY'
           import os,urllib.request,urllib.error,urllib.parse,pathlib,hashlib,re
           class NoRedirect(urllib.request.HTTPRedirectHandler):
               def redirect_request(self,*args):return None
-          asset=os.environ['ASSET_ID'];assert asset.isdigit()
-          request=urllib.request.Request('https://api.github.com/repos/SURIDAGEST/coupe-connect-updates/releases/assets/'+asset,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/octet-stream','X-GitHub-Api-Version':'2022-11-28'})
-          try:
-              response=urllib.request.build_opener(NoRedirect).open(request,timeout=60)
-              data=response.read(50*1024*1024+1)
-          except urllib.error.HTTPError as response:
-              assert response.code in (301,302,303,307,308)
-              target=response.headers['Location'];assert urllib.parse.urlsplit(target).scheme=='https'
-              # Never send the GitHub token to the asset-storage redirect.
-              data=urllib.request.urlopen(target,timeout=60).read(50*1024*1024+1)
-          expected=os.environ['EXPECTED_SHA256'];assert re.fullmatch('[0-9a-f]{64}',expected)
-          assert len(data)<=50*1024*1024 and hashlib.sha256(data).hexdigest()==expected
-          pathlib.Path('candidate.apk').write_bytes(data)
-          old_url='https://github.com/SURIDAGEST/coupe-connect-updates/releases/download/v2026.11.23-car23-phone19-audit1-test/Coupe-Connect-Car-0.10.0-audit1.apk'
-          data=urllib.request.urlopen(old_url,timeout=60).read(50*1024*1024+1)
-          assert hashlib.sha256(data).hexdigest()=='1f3edefbce434610977b86e47c64f20e2612403fc4a339d0b4e60c1bcb6ddd80'
-          pathlib.Path('baseline.apk').write_bytes(data)
+          for name,prefix,limit in [('candidate.apk','CAR',50*1024*1024),('probe.apk','PROBE',5*1024*1024)]:
+              asset=os.environ[prefix+'_ID'];expected=os.environ[prefix+'_SHA']
+              assert asset.isdigit() and re.fullmatch('[0-9a-f]{64}',expected)
+              request=urllib.request.Request('https://api.github.com/repos/SURIDAGEST/coupe-connect-updates/releases/assets/'+asset,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/octet-stream'})
+              try:data=urllib.request.build_opener(NoRedirect).open(request,timeout=60).read(limit+1)
+              except urllib.error.HTTPError as response:
+                  assert response.code in (301,302,303,307,308)
+                  target=response.headers['Location'];assert urllib.parse.urlsplit(target).scheme=='https'
+                  data=urllib.request.urlopen(target,timeout=60).read(limit+1)
+              assert len(data)<=limit and hashlib.sha256(data).hexdigest()==expected
+              pathlib.Path(name).write_bytes(data)
           PY
-      - name: Pass only the two verified APKs to the unprivileged test job
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: api27-verified-inputs
-          path: |
-            candidate.apk
-            baseline.apk
-          retention-days: 1
-  api27:
-    needs: fetchCandidate
-    runs-on: ubuntu-22.04
-    timeout-minutes: 20
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: api27-verified-inputs
-      - name: Enable hardware acceleration
-        run: sudo chmod 666 /dev/kvm
-      - name: Test upgrade, unified desktop, connection commands and actual virtual boot
-        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+      - run: sudo chmod 666 /dev/kvm
+      - uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         env:
-          CANDIDATE_SHA256: ${{ inputs.apk_sha256 }}
+          COUPE_ISOLATED_RENDERER_CI: 'true'
+          CAR_SHA256: ${{ inputs.car_sha256 }}
+          PROBE_SHA256: ${{ inputs.probe_sha256 }}
+          EXPECTED_SIGNER_SHA256: ${{ inputs.signer_sha256 }}
           EXPECTED_API: ${{ inputs.api_level }}
           EXPECTED_VERSION_CODE: ${{ inputs.version_code }}
-          MAP_PICKER_ID: ${{ inputs.map_picker_id }}
         with:
           api-level: ${{ inputs.api_level }}
           target: ${{ inputs.api_level == '35' && 'google_apis' || 'default' }}
           arch: x86_64
           ram-size: ${{ inputs.api_level == '35' && '2048M' || '1024M' }}
           emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect -feature -Vulkan -skin 800x480
-          script: python3 tests/car_deep_smoke.py
-      - name: Preserve actual runtime evidence
+          script: python3 tests/car_renderer_smoke.py
+      - name: Preserve reports only, never the private APKs
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: car-deep-${{ github.run_id }}
+          name: car-renderer-${{ inputs.api_level }}-${{ github.run_id }}
           path: audit/
           retention-days: 30
