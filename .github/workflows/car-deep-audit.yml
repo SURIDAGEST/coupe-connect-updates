@@ -1,4 +1,5 @@
 name: Private Car renderer recovery audit
+run-name: Renderer API ${{ inputs.api_level }} - Car ${{ inputs.version_code }}
 on:
   workflow_dispatch:
     inputs:
