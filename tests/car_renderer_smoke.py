@@ -42,12 +42,15 @@ def instrument(version,folder):
                 linked=re.findall(r'Start proc (\d+):com\.android\.webview:sandboxed_process\d+/[^\n]*for webview_service com\.coupe\.connect/org\.chromium\.[^\n]+',logs)
                 assert linked,'No isolated renderer linked to our target app'
                 pid=linked[-1];status=adb('shell','cat','/proc/'+pid+'/status')[1]
-                cmdline=adb('shell','cat','/proc/'+pid+'/cmdline')[1].split('\0')[0]
+                cmdline=adb('shell','cat','/proc/'+pid+'/cmdline')[1]
                 uid=re.search(r'^Uid:\s+(\d+)\s',status,re.M)
                 evidence={'pid':int(pid),'cmdline':cmdline,'status':status,'targetLinked':True,'isolatedEmulator':True}
                 (folder/'host-renderer-termination.json').write_text(json.dumps(evidence,indent=2),encoding='utf-8')
                 assert uid and 99000<=int(uid.group(1))<=99999,'Expected Android isolated renderer UID'
-                assert cmdline.startswith('com.android.webview:sandboxed_process'),'Unexpected renderer process name'
+                # API 27 splits the long process title at its original argv boundary; comm
+                # retains the last 15 characters. Validate both, plus the app-linked PID/UID.
+                comm=re.search(r'^Name:\s+([^\n]+)',status,re.M)
+                assert cmdline.startswith('com.android.webview:sandboxe') and comm and re.fullmatch(r'.*dboxed_process\d+',comm.group(1)),'Unexpected renderer process name'
                 adb('shell','kill','-9',pid);kill_done=True
         return process.wait(timeout=10),''.join(output),''
     finally:
