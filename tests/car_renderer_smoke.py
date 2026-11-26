@@ -41,10 +41,13 @@ def instrument(version,folder):
                 logs=adb('logcat','-d','-v','brief')[1]
                 linked=re.findall(r'Start proc (\d+):com\.android\.webview:sandboxed_process\d+/[^\n]*for webview_service com\.coupe\.connect/org\.chromium\.[^\n]+',logs)
                 assert linked,'No isolated renderer linked to our target app'
-                pid=linked[-1];processes=adb('shell','ps','-A')[1]
-                matching=[x for x in processes.splitlines() if len(x.split())>2 and x.split()[1]==pid]
-                assert len(matching)==1 and re.match(r'u\d+_i\d+\s',matching[0]) and 'com.android.webview:sandboxed_process' in matching[0]
-                (folder/'host-renderer-termination.json').write_text(json.dumps({'pid':int(pid),'process':matching[0],'targetLinked':True,'isolatedEmulator':True},indent=2),encoding='utf-8')
+                pid=linked[-1];status=adb('shell','cat','/proc/'+pid+'/status')[1]
+                cmdline=adb('shell','cat','/proc/'+pid+'/cmdline')[1].split('\0')[0]
+                uid=re.search(r'^Uid:\s+(\d+)\s',status,re.M)
+                evidence={'pid':int(pid),'cmdline':cmdline,'status':status,'targetLinked':True,'isolatedEmulator':True}
+                (folder/'host-renderer-termination.json').write_text(json.dumps(evidence,indent=2),encoding='utf-8')
+                assert uid and 99000<=int(uid.group(1))<=99999,'Expected Android isolated renderer UID'
+                assert cmdline.startswith('com.android.webview:sandboxed_process'),'Unexpected renderer process name'
                 adb('shell','kill','-9',pid);kill_done=True
         return process.wait(timeout=10),''.join(output),''
     finally:
@@ -105,15 +108,19 @@ def main():
             # This package was installed by this audit on the fresh, guarded emulator.
             adb('shell','am','force-stop',PACKAGE)
             adb('shell','wm','size',label);adb('shell','wm','density','160')
+            # Display/density changes and boot-time system configuration can recreate Activities.
+            # Settle the owned guest before starting instrumentation; no user device is touched.
+            time.sleep(15)
             code,text,error=instrument(version,folder)
             (folder/'instrumentation.txt').write_text(text+'\n'+error,encoding='utf-8')
+            for name in ['flow-renderer-before.png','flow-renderer-native.png','flow-renderer-after.png']:
+                adb('pull','/data/user/0/'+PACKAGE+'/cache/'+name,folder/name,required=False)
             match=re.search(r'^INSTRUMENTATION_RESULT: flow_report=(\{.*\})$',text,re.M)
             assert code==0 and match,'Instrumentation did not return a report: '+label
             report=json.loads(match.group(1));save(label+'/renderer-report.json',report)
             assert report.get('passed') is True and 'INSTRUMENTATION_CODE: -1' in text,'Renderer recovery failed: '+label
             assert report['apkSha256']==os.environ['CAR_SHA256'] and report['versionCode']==version
             for name in ['flow-renderer-before.png','flow-renderer-native.png','flow-renderer-after.png']:
-                adb('pull','/data/user/0/'+PACKAGE+'/cache/'+name,folder/name)
                 assert (folder/name).stat().st_size>0
             results.append({'viewport':[width,height],'report':label+'/renderer-report.json','passed':True})
         save('summary.json',{'passed':True,'apkSha256':os.environ['CAR_SHA256'],'probeSha256':os.environ['PROBE_SHA256'],
