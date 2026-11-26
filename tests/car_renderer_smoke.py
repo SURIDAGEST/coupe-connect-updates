@@ -1,6 +1,6 @@
 """Private exact-APK renderer audit on a fresh GitHub-hosted Android emulator only."""
 from pathlib import Path
-import hashlib,json,os,re,subprocess,time
+import hashlib,json,os,re,subprocess,time,queue,threading
 
 PACKAGE='com.coupe.connect'
 PROBE='com.coupe.connect.audit.renderer'
@@ -18,6 +18,38 @@ def adb(*args,**kwargs):return run('adb','-s',SERIAL,*args,**kwargs)
 def save(name,value):
     OUT.mkdir(exist_ok=True)
     (OUT/name).write_text(json.dumps(value,indent=2)+'\n',encoding='utf-8')
+
+def instrument(version,folder):
+    command=['adb','-s',SERIAL,'shell','am','instrument','-w','-r','-e','apk_sha256',os.environ['CAR_SHA256'],
+             '-e','version_code',str(version),INSTRUMENT]
+    process=subprocess.Popen(command,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,encoding='utf-8',errors='replace')
+    lines=queue.Queue();output=[];deadline=time.monotonic()+240;kill_done=False
+    def read():
+        for line in process.stdout:lines.put(line)
+        lines.put(None)
+    reader=threading.Thread(target=read,daemon=True);reader.start()
+    try:
+        while True:
+            assert time.monotonic()<deadline,'Instrumentation timed out'
+            try:line=lines.get(timeout=1)
+            except queue.Empty:continue
+            if line is None:break
+            output.append(line)
+            if line.strip()=='INSTRUMENTATION_STATUS: flow_renderer_kill=isolated-emulator-api27':
+                assert int(os.environ['EXPECTED_API'])==27 and not kill_done
+                assert adb('shell','getprop','ro.kernel.qemu')[1].strip()=='1'
+                logs=adb('logcat','-d','-v','brief')[1]
+                linked=re.findall(r'Start proc (\d+):com\.android\.webview:sandboxed_process\d+/[^\n]*for webview_service com\.coupe\.connect/org\.chromium\.[^\n]+',logs)
+                assert linked,'No isolated renderer linked to our target app'
+                pid=linked[-1];processes=adb('shell','ps','-A')[1]
+                matching=[x for x in processes.splitlines() if len(x.split())>2 and x.split()[1]==pid]
+                assert len(matching)==1 and re.match(r'u\d+_i\d+\s',matching[0]) and 'com.android.webview:sandboxed_process' in matching[0]
+                (folder/'host-renderer-termination.json').write_text(json.dumps({'pid':int(pid),'process':matching[0],'targetLinked':True,'isolatedEmulator':True},indent=2),encoding='utf-8')
+                adb('shell','kill','-9',pid);kill_done=True
+        return process.wait(timeout=10),''.join(output),''
+    finally:
+        if process.poll() is None:process.kill();process.wait(timeout=10)
+        (folder/'instrumentation.txt').write_text(''.join(output),encoding='utf-8')
 
 def tools():
     sdk=Path(os.environ.get('ANDROID_HOME',os.environ.get('ANDROID_SDK_ROOT','')))
@@ -73,8 +105,7 @@ def main():
             # This package was installed by this audit on the fresh, guarded emulator.
             adb('shell','am','force-stop',PACKAGE)
             adb('shell','wm','size',label);adb('shell','wm','density','160')
-            code,text,error=adb('shell','am','instrument','-w','-r','-e','apk_sha256',os.environ['CAR_SHA256'],
-                '-e','version_code',str(version),INSTRUMENT,timeout=240,required=False)
+            code,text,error=instrument(version,folder)
             (folder/'instrumentation.txt').write_text(text+'\n'+error,encoding='utf-8')
             match=re.search(r'^INSTRUMENTATION_RESULT: flow_report=(\{.*\})$',text,re.M)
             assert code==0 and match,'Instrumentation did not return a report: '+label
